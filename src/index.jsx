@@ -4,7 +4,7 @@ var mqtt = require('mqtt');
 var React = require('react');
 var ReactDOM = require('react-dom');
 // var {LineChart, XAxis, YAxis, Tooltip, Legend, Line, CartesianGrid, ResponsiveContainer} = require('recharts');
-var {XYPlot, XAxis, YAxis, HorizontalGridLines, VerticalGridLines, LineSeries} = require('react-vis');
+var {XYPlot, XAxis, YAxis, HorizontalGridLines, VerticalGridLines, LineSeries, DiscreteColorLegend} = require('react-vis');
 var dateformat = require('dateformat');
 
 class Subscription extends React.PureComponent {
@@ -23,23 +23,25 @@ class TemperaturePlot extends React.PureComponent {
   constructor(props) {
     super(props);
     this.state = {
-      data: []
+      data: {}
     };
     this.props.client.subscribe(this.props.topic);
     // this.props.client.onMessageArrived((msg) => {
     //   console.log(msg);
     // });
     this.props.client.on('message', (topic, message) => {
-      if(topic == this.props.topic) {
-        this.setState((prevState, props) => {
-          return {data: prevState.data.concat([{timestamp: Date.now(), value: Number.parseInt(message.toString())}]).slice(-10)};
-        });
-      }
+      this.setState((prevState, props) => {
+        let obj = Object.assign({}, prevState['data'], {[topic]: (prevState.data[topic] || [])
+                                                .concat([{timestamp: Date.now(),
+                                                          value: Number.parseInt(message.toString())}])
+                                                .slice(-10)})
+        return {data: obj};
+      });
     });
   }
 
   render() {
-    if(this.state.data.length > 0) {
+    if(Object.keys(this.state.data).length > 0) {
       return (
         // <ResponsiveContainer>
         //   <LineChart data={this.state.data} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
@@ -51,12 +53,14 @@ class TemperaturePlot extends React.PureComponent {
         //     <Line unit="F" name="Temperature" type="monotone" dataKey="value" stroke="#333" />
         //   </LineChart>
         // </ResponsiveContainer>
-        <XYPlot width={300} height={300} xType="time" yDomain={[0,100]}>
+        <XYPlot width={800} height={300} xType="time" yDomain={[0,100]}>
           <HorizontalGridLines/>
           <VerticalGridLines/>
           <XAxis title="Time"/>
           <YAxis title="Temperature"/>
-          <LineSeries data={this.state.data.map(({timestamp, value}) => {return {x: timestamp, y: value};})}/>
+          {Object.keys(this.state.data).map((topic) => <LineSeries key={topic} data={this.state.data[topic]
+                                                                   .map(({timestamp, value}) => {return {x: timestamp, y: value};})}/>)}
+          <DiscreteColorLegend items={Object.keys(this.state.data).map((topic) => topic.split("/").slice(-2,-1)[0])} />
         </XYPlot>
       );
     }
@@ -67,7 +71,7 @@ class TemperaturePlot extends React.PureComponent {
 var client = mqtt.connect("ws://localhost:1884");
 client.on('connect', () => {
   ReactDOM.render(
-    <TemperaturePlot topic="home/bedroom/temperature" client={client} />,
+    <TemperaturePlot topic="home/+/temperature" client={client} />,
     document.getElementById("root")
   )
 });
