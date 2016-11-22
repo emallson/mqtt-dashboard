@@ -3,75 +3,73 @@
 var mqtt = require('mqtt');
 var React = require('react');
 var ReactDOM = require('react-dom');
-// var {LineChart, XAxis, YAxis, Tooltip, Legend, Line, CartesianGrid, ResponsiveContainer} = require('recharts');
 var {XYPlot, XAxis, YAxis, HorizontalGridLines, VerticalGridLines, LineSeries, DiscreteColorLegend} = require('react-vis');
+var Immutable = require('immutable');
 var dateformat = require('dateformat');
 
-class Subscription extends React.PureComponent {
-  render() {
-    return <h1>Subscription {this.props.topic}</h1>;
-  }
+function topic_match(pattern, topic) {
+  let re = new RegExp(pattern.replace(/\+/g, '([^/]+)').replace(/#/g, '(.+)'));
+
+  return topic.match(re);
 }
 
-class SubscriptionList extends React.PureComponent {
-  render() {
-    return (<ul>{this.props.topics.map((topic) => React.createElement(Subscription, {topic}, null))}</ul>);
-  }
+function parse_temperature_msg(message) {
+  return Immutable.fromJS({timestamp: Date.now(),
+                            value: Number.parseInt(message.toString())});
 }
 
 class TemperaturePlot extends React.PureComponent {
-  constructor(props) {
-    super(props);
-    this.state = {
-      data: {}
-    };
-    this.props.client.subscribe(this.props.topic);
-    // this.props.client.onMessageArrived((msg) => {
-    //   console.log(msg);
-    // });
-    this.props.client.on('message', (topic, message) => {
-      this.setState((prevState, props) => {
-        let obj = Object.assign({}, prevState['data'], {[topic]: (prevState.data[topic] || [])
-                                                .concat([{timestamp: Date.now(),
-                                                          value: Number.parseInt(message.toString())}])
-                                                .slice(-10)})
-        return {data: obj};
-      });
-    });
-  }
-
   render() {
-    if(Object.keys(this.state.data).length > 0) {
-      return (
-        // <ResponsiveContainer>
-        //   <LineChart data={this.state.data} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-        //     <XAxis dataKey="timestamp"/>
-        //     <YAxis domain={['dataMin - 5', 'dataMax + 5']}/>
-        //     <CartesianGrid strokeDasharray="3 3" />
-        //     <Tooltip separator=': '/>
-        //     <Legend/>
-        //     <Line unit="F" name="Temperature" type="monotone" dataKey="value" stroke="#333" />
-        //   </LineChart>
-        // </ResponsiveContainer>
+     return (
         <XYPlot width={800} height={300} xType="time" yDomain={[0,100]}>
           <HorizontalGridLines/>
           <VerticalGridLines/>
           <XAxis title="Time"/>
           <YAxis title="Temperature"/>
-          {Object.keys(this.state.data).map((topic) => <LineSeries key={topic} data={this.state.data[topic]
-                                                                   .map(({timestamp, value}) => {return {x: timestamp, y: value};})}/>)}
-          <DiscreteColorLegend items={Object.keys(this.state.data).map((topic) => topic.split("/").slice(-2,-1)[0])} />
+          {this.props.data.map((vals, topic) => <LineSeries key={topic} data={vals.toJS().map(({timestamp, value}) => {return {x: timestamp, y: value};})}/>).toArray()}
+         <DiscreteColorLegend items={this.props.data.keySeq().toJS()} />
         </XYPlot>
       );
-    }
-    return null;
+  }
+}
+
+function concatMerger(a, b) {
+  if(Immutable.List.isList(a) && Immutable.List.isList(b)) {
+    return a.concat(b);
+  }
+  if(a && a.mergeWith) {
+    return a.mergeWith(concatMerger, b);
+  }
+  return b;
+}
+
+class TemperaturePlots extends React.PureComponent {
+  constructor(props) {
+    super(props);
+    this.state = {data:  Immutable.fromJS({ shown: {}, hidden: {} })};
+
+    this.props.client.subscribe(this.props.topic); // false generality
+    this.props.client.on('message', (topic, message) => {
+      let [whole, building, room] = topic_match('+/+/temperature', topic);
+
+      this.setState((prev, props) => {return {data: prev.data.mergeWith(concatMerger, {
+        [prev.data.get('hidden').has(building)? 'hidden' : 'shown']: {
+          [building]: {[room]: [parse_temperature_msg (message)]}
+        }
+      })}});
+    });
+  }
+
+  render() {
+    var plots = this.state.data.get('shown').map((state, building) => <TemperaturePlot key={building} data={state} />);
+    return (<div>{plots.toArray()}</div>);
   }
 }
 
 var client = mqtt.connect("ws://localhost:1884");
 client.on('connect', () => {
   ReactDOM.render(
-    <TemperaturePlot topic="home/+/temperature" client={client} />,
+    <TemperaturePlots topic="+/+/temperature" client={client} />,
     document.getElementById("root")
   )
 });
