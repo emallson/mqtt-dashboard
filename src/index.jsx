@@ -130,7 +130,9 @@ class DeviceBlock extends React.PureComponent {
 class DeviceDescriptionRegion extends React.PureComponent {
   render() {
     return (
-      <div className="device-block-region">{Object.keys(this.props.devices).map((key) => <DeviceBlock key={key} device={this.props.devices[key]}/>)}</div>
+      <div className="device-block-region">
+        {Object.keys(this.props.devices).map((key) => <DeviceBlock key={key} device={this.props.devices[key]}/>)}
+      </div>
     );
   }
 }
@@ -156,7 +158,7 @@ var devices = {
   }
  }
 
-var client = mqtt.connect("ws://localhost:1884");
+var client = mqtt.connect("ws://10.227.162.167:1884");
 client.on('connect', () => {
   ReactDOM.render(
     <div>

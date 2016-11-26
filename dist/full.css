@@ -24,7 +24,30 @@ path {
     color: #111;
 }
 
+.device-block.disabled {
+    opacity: 0.4;
+    -webkit-filter: grayscale(80%) blur(1px);
+    -ms-filter: grayscale(80%) blur(1px);
+    -o-filter: grayscale(80%) blur(1px);
+    -moz-filter: grayscale(80%) blur(1px);
+    filter: grayscale(80%) blur(1px);
+}
+
+.device-block.disabled:hover {
+    -webkit-filter: grayscale(80%) ;
+    -ms-filter: grayscale(80%) ;
+    -o-filter: grayscale(80%) ;
+    -moz-filter: grayscale(80%) ;
+    filter: grayscale(80%) ;
+}
+
 @media(min-width: 768px) {
+    .device-block {
+        width: 330px;
+    }
+}
+
+@media(min-width: 1024px) {
     .device-block {
         width: 400px;
     }
