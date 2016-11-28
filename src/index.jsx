@@ -3,10 +3,10 @@
 var mqtt = require('mqtt');
 var React = require('react');
 var ReactDOM = require('react-dom');
-var {XYPlot, XAxis, YAxis, HorizontalGridLines, VerticalGridLines, LineSeries, DiscreteColorLegend} = require('react-vis');
 var Immutable = require('immutable');
 var moment = require('moment');
-var ch = require('color-hash');
+var {TemperaturePlots} = require('./temperature-plots.jsx');
+var {DeviceDescriptionRegion} = require('./devices.jsx');
 
 function topic_match(pattern, topic) {
   let re = new RegExp(pattern.replace(/\+/g, '([^/]+)').replace(/#/g, '(.+)'));
@@ -19,20 +19,6 @@ function parse_temperature_msg(message) {
                             value: Number.parseInt(message.toString())});
 }
 
-class TemperaturePlot extends React.PureComponent {
-  render() {
-     return (
-        <XYPlot width={800} height={300} xType="time" yDomain={[0,100]}>
-          <HorizontalGridLines/>
-          <VerticalGridLines/>
-          <XAxis title="Time"/>
-          <YAxis title="Temperature"/>
-          {this.props.data.map((vals, topic) => <LineSeries key={topic} data={vals.toJS().map(({timestamp, value}) => {return {x: timestamp, y: value};})}/>).toArray()}
-         <DiscreteColorLegend items={this.props.data.keySeq().toJS()} />
-        </XYPlot>
-      );
-  }
-}
 
 function concatMerger(a, b) {
   if(Immutable.List.isList(a) && Immutable.List.isList(b)) {
@@ -67,71 +53,57 @@ function truncate_timeseries(data) {
   return data.map((segment) => segment.map((bld) => bld.map((room) => room.filter((obj) => moment(obj.get('timestamp')).isSameOrAfter(limit)))))
 }
 
-class TemperaturePlots extends React.PureComponent {
+
+
+class IoTDashboard extends React.PureComponent {
   constructor(props) {
     super(props);
-    this.state = load(this.props.preserve) || {data:  { shown: {}, hidden: {} }};
+    this.state = load(this.props.preserve) || {
+      data:  { shown: {}, hidden: {} },
+      devices: {},
+      alive: {}
+    };
     this.state.data = Immutable.fromJS(this.state.data);
+    this.state.devices = Immutable.fromJS(this.state.devices);
+    this.state.alive = Immutable.fromJS(this.state.alive);
 
-    this.props.client.subscribe(this.props.topic); // false generality
+    this.props.client.subscribe('+/+/temperature');
+    this.props.client.subscribe('iot/device/added');
+    this.props.client.subscribe('iot/device/died');
     this.props.client.on('message', (topic, message) => {
-      let [whole, building, room] = topic_match('+/+/temperature', topic);
+      if(topic_match('+/+/temperature', topic)) {
+        // Temperature received, append it
+        let [whole, building, room] = topic_match('+/+/temperature', topic);
 
-      this.setState((prev, props) => {return {data: truncate_timeseries(prev. data. mergeWith (concatMerger, {
-        [prev.data.get('hidden').has(building)? 'hidden' : 'shown']: {
-          [building]: {[room]: [parse_temperature_msg (message)]}
-        }
-      }))}});
+        this.setState((prev, props) => {return {data: truncate_timeseries(prev.data.mergeWith(concatMerger, {
+          [prev.data.get('hidden').has(building)? 'hidden' : 'shown']: {
+            [building]: {[room]: [parse_temperature_msg (message)]}
+          }
+        }))}});
+      } else if (topic_match('iot/device/added', topic)) {
+        // device added
+        this.props.client.subscribe('iot/device/status/' + message.toString());
+      } else if (topic_match('iot/device/status/+', topic)) {
+        // received device ddl
+        let [whole, uuid] = topic_match('iot/device/status/+', topic);
+        this.setState((prev, props) => {
+          return {devices: prev.devices.set(uuid, Immutable.fromJS(JSON.parse(message.toString()))),
+                  alive: prev.alive.set(uuid, true)}
+        });
+      } else if (topic_match('iot/device/died', topic)) {
+        // device died
+        this.setState((prev, props) => {
+          return {alive: prev.alive.set(message.toString(), false)}
+        });
+      }
     });
   }
 
   render() {
-    var plots = this.state.data.get('shown').map((state, building) => <TemperaturePlot key={building} data={state} />);
-    return (<div>{plots.toArray()}</div>);
-  }
-
-  componentDidUpdate(prevProps, prevState) {
-    if(prevProps.hasOwnProperty('preserve')) {
-      store(prevProps.preserve, this.state);
-    }
-  }
-}
-
-var hasher = new ch({saturation: 0.25, lightness: 0.6});
-class DeviceBlock extends React.PureComponent {
-  render() {
-    var subs = null;
-    if(this.props.device.subscribes.length > 0) {
-      subs = <div className="subscriptions">
-        {this.props.device.subscribes.map((topic) => <code key={topic}>{topic}</code>)}
-      </div>;
-    }
-    var pubs = null;
-    if(this.props.device.publishes.length > 0) {
-      pubs = <div className="publishes">
-        {this.props.device.publishes.map((topic) => <code key={topic}>{topic}</code>)}
-      </div>;
-    }
     return (
-      <div className="device-block" style={{borderColor: hasher.hex(this.props.device.type)}}>
-        <div className="title" style={{backgroundColor: hasher.hex(this.props.device.type)}}>
-          <h3>{this.props.device.type}</h3>
-        </div>
-        <div className="body">
-          {this.props.device.description}
-        </div>
-        {pubs}
-        {subs}
-      </div>
-    );
-  }
-}
-
-class DeviceDescriptionRegion extends React.PureComponent {
-  render() {
-    return (
-      <div className="device-block-region">
-        {Object.keys(this.props.devices).map((key) => <DeviceBlock key={key} device={this.props.devices[key]}/>)}
+      <div>
+        <DeviceDescriptionRegion devices={this.state.devices} alive={this.state.alive} />
+        <TemperaturePlots data={this.state.data} />
       </div>
     );
   }
@@ -158,15 +130,10 @@ var devices = {
   }
  }
 
-var client = mqtt.connect("ws://10.227.162.167:1884");
+var client = mqtt.connect("ws://localhost:1884");
 client.on('connect', () => {
   ReactDOM.render(
-    <div>
-      <div><DeviceDescriptionRegion devices={devices} /></div>
-      <div><TemperaturePlots topic="+/+/temperature" client={client} preserve="temp-data" /></div>
-    </div>,
+    <IoTDashboard client={client} />,
     document.getElementById("root")
   )
 });
-
-client.subscribe('home/bedroom/temperature', () => console.log(arguments));
