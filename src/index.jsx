@@ -99,6 +99,12 @@ class IoTDashboard extends React.PureComponent {
     });
   }
 
+  componentDidUpdate(prevProps, prevState) {
+    if (prevProps.preserve) {
+      store(prevProps.preserve, this.state);
+    }
+  }
+
   render() {
     return (
       <div>
@@ -133,7 +139,7 @@ var devices = {
 var client = mqtt.connect("ws://localhost:1884");
 client.on('connect', () => {
   ReactDOM.render(
-    <IoTDashboard client={client} />,
+    <IoTDashboard client={client} preserve="iot-dashboard" />,
     document.getElementById("root")
   )
 });
